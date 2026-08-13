@@ -1,5 +1,6 @@
 from datetime import datetime
 from uuid import UUID, uuid4
+from pgvector.sqlalchemy import Vector
 
 from sqlalchemy import (
     DateTime,
@@ -184,6 +185,11 @@ class HealthMemory(Base):
     user: Mapped["User"] = relationship(
         back_populates="health_memories"
     )
+
+    embedding: Mapped[list[float] | None] = mapped_column(
+    Vector(768),
+    nullable=True
+)
 
 
 class Document(Base):

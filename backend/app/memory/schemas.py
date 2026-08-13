@@ -35,3 +35,6 @@ class MemoryUpdate(BaseModel):
         ge=0,
         le=1
     )
+
+class RelevantMemoryResponse(MemoryResponse):
+    similarity: float
