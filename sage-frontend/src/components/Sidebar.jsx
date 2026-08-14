@@ -1,82 +1,35 @@
-import {
-  House,
-  HeartPulse,
-  FileText,
-  Settings
-} from "lucide-react";
+import { House, HeartPulse, FileText, MessageCircle } from "lucide-react";
+import { motion } from "framer-motion";
 
 function Sidebar({ activePage, setActivePage }) {
-
   const menuItems = [
-    {
-      id: "home",
-      label: "SAGE",
-      icon: House
-    },
-    {
-      id: "health",
-      label: "My Health",
-      icon: HeartPulse
-    },
-    {
-      id: "documents",
-      label: "Documents",
-      icon: FileText
-    }
+    { id: "home",      label: "Home",       icon: House },
+    { id: "chat",      label: "Chat",       icon: MessageCircle },
+    { id: "health",    label: "Health",     icon: HeartPulse },
+    { id: "documents", label: "Documents",  icon: FileText },
   ];
 
   return (
-    <aside className="sidebar">
-
-      {/* Logo */}
-      <div className="sidebar-logo">
-        <div className="logo-circle">
-          S
-        </div>
-
-        <div>
-          <h2>SAGE</h2>
-          <span>Health Companion</span>
-        </div>
-      </div>
-
-      {/* Navigation */}
-      <nav className="sidebar-navigation">
-
-        {menuItems.map((item) => {
-
-          const Icon = item.icon;
-
-          return (
-            <button
-              key={item.id}
-              className={
-                activePage === item.id
-                  ? "nav-item active"
-                  : "nav-item"
-              }
-              onClick={() => setActivePage(item.id)}
-            >
-              <Icon size={20} />
-              <span>{item.label}</span>
-            </button>
-          );
-
-        })}
-
-      </nav>
-
-      {/* Bottom */}
-      <div className="sidebar-bottom">
-
-        <button className="nav-item">
-          <Settings size={20} />
-          <span>Settings</span>
-        </button>
-
-      </div>
-
-    </aside>
+    <nav className="floating-bottom-nav" aria-label="Main navigation">
+      {menuItems.map((item) => {
+        const Icon = item.icon;
+        const isActive = activePage === item.id;
+        return (
+          <motion.button
+            key={item.id}
+            className={`bottom-nav-item ${isActive ? "active" : ""}`}
+            onClick={() => setActivePage(item.id)}
+            whileTap={{ scale: 0.88 }}
+            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+            title={item.label}
+            aria-label={item.label}
+            aria-current={isActive ? "page" : undefined}
+          >
+            <Icon size={20} strokeWidth={isActive ? 2.5 : 1.8} />
+          </motion.button>
+        );
+      })}
+    </nav>
   );
 }
 

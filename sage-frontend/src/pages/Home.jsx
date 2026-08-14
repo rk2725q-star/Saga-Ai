@@ -1,633 +1,147 @@
-import { useState, useRef } from "react";
-import {
-  Mic,
-  MicOff,
-  Plus,
-  Send,
-  Paperclip
-} from "lucide-react";
+import React from 'react';
+import { motion } from 'framer-motion';
+import { ArrowRight, MessageSquare, Brain, LineChart, Shield, ShieldCheck } from 'lucide-react';
 
-function Home() {
-
-  const [messages, setMessages] = useState([]);
-
-  const [input, setInput] = useState("");
-
-  const [isListening, setIsListening] = useState(false);
-
-  const [isThinking, setIsThinking] = useState(false);
-
-  const [showUploadMenu, setShowUploadMenu] = useState(false);
-
-  const recognitionRef = useRef(null);
-
-  const fileInputRef = useRef(null);
-
-
-  // ==========================
-  // MICROPHONE
-  // ==========================
-
-  const handleMic = () => {
-
-    const SpeechRecognition =
-      window.SpeechRecognition ||
-      window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-
-      alert(
-        "Speech recognition is not supported in this browser. Please use Google Chrome."
-      );
-
-      return;
-    }
-
-
-    if (isListening) {
-
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
+function Home({ setActivePage }) {
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1
       }
-
-      setIsListening(false);
-
-      return;
     }
-
-
-    const recognition = new SpeechRecognition();
-
-    recognition.lang = "en-IN";
-
-    recognition.continuous = false;
-
-    recognition.interimResults = true;
-
-
-    recognition.onstart = () => {
-
-      setIsListening(true);
-
-    };
-
-
-    recognition.onresult = (event) => {
-
-      let transcript = "";
-
-      for (
-        let i = event.resultIndex;
-        i < event.results.length;
-        i++
-      ) {
-
-        transcript +=
-          event.results[i][0].transcript;
-
-      }
-
-      setInput(transcript);
-
-    };
-
-
-    recognition.onerror = (event) => {
-
-      console.log(
-        "Speech recognition error:",
-        event.error
-      );
-
-      setIsListening(false);
-
-    };
-
-
-    recognition.onend = () => {
-
-      setIsListening(false);
-
-    };
-
-
-    recognitionRef.current = recognition;
-
-    recognition.start();
-
   };
 
-
-  // ==========================
-  // SEND MESSAGE
-  // ==========================
-
-  const handleSend = () => {
-
-    const text = input.trim();
-
-    if (!text) return;
-
-
-    const userMessage = {
-
-      id: Date.now(),
-
-      role: "user",
-
-      content: text
-
-    };
-
-
-    setMessages((previous) => [
-
-      ...previous,
-
-      userMessage
-
-    ]);
-
-
-    setInput("");
-
-    setIsThinking(true);
-
-
-    // Temporary response
-    // Later this will connect to Person 1's AI API
-
-    setTimeout(() => {
-
-      const assistantMessage = {
-
-        id: Date.now() + 1,
-
-        role: "assistant",
-
-        content:
-          "I understand. Tell me a little more about what you're experiencing so I can help you understand it better."
-
-      };
-
-
-      setMessages((previous) => [
-
-        ...previous,
-
-        assistantMessage
-
-      ]);
-
-
-      setIsThinking(false);
-
-    }, 1200);
-
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    show: { opacity: 1, y: 0, transition: { type: "spring", bounce: 0 } }
   };
-
-
-  // ==========================
-  // ENTER KEY
-  // ==========================
-
-  const handleKeyDown = (event) => {
-
-    if (
-      event.key === "Enter" &&
-      !event.shiftKey
-    ) {
-
-      event.preventDefault();
-
-      handleSend();
-
-    }
-
-  };
-
-
-  // ==========================
-  // FILE UPLOAD
-  // ==========================
-
-  const handleFileSelect = (event) => {
-
-    const file = event.target.files[0];
-
-    if (!file) return;
-
-
-    const userMessage = {
-
-      id: Date.now(),
-
-      role: "user",
-
-      content:
-        `📎 Uploaded: ${file.name}`
-
-    };
-
-
-    setMessages((previous) => [
-
-      ...previous,
-
-      userMessage
-
-    ]);
-
-
-    setShowUploadMenu(false);
-
-
-    // Later Person 3 will connect
-    // the real document processing API.
-
-  };
-
-
-  // ==========================
-  // EMPTY HOME SCREEN
-  // ==========================
-
-  const showWelcome = messages.length === 0;
-
 
   return (
+    <div className="landing-page">
+      <div className="landing-scroll-area">
+        
+        {/* HERO SECTION */}
+        <section className="hero-section">
+          <motion.div 
+            className="hero-content"
+            variants={containerVariants}
+            initial="hidden"
+            animate="show"
+          >
+            <motion.div className="hero-badge" variants={itemVariants}>
+              <Brain size={14} />
+              <span>Introducing SAGE AI Health Memory</span>
+            </motion.div>
+            
+            <motion.h1 variants={itemVariants}>
+              Your health, <br/>
+              <span className="text-gradient">understood.</span>
+            </motion.h1>
+            
+            <motion.p variants={itemVariants} className="hero-subtitle">
+              SAGE helps you understand your health information, track your symptoms over time, and build a secure, private memory of your wellness journey. Clinical minimalist design for your peace of mind.
+            </motion.p>
+            
+            <motion.div className="hero-actions" variants={itemVariants}>
+              <button 
+                className="btn-primary" 
+                onClick={() => setActivePage('chat')}
+              >
+                Get Started <ArrowRight size={16} />
+              </button>
+              <button 
+                className="btn-secondary"
+                onClick={() => setActivePage('health')}
+              >
+                Explore SAGE
+              </button>
+            </motion.div>
+          </motion.div>
 
-    <div className="home-page">
+          <motion.div 
+            className="hero-image-container"
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4, type: "spring", bounce: 0, duration: 0.8 }}
+          >
+            <div className="hero-image-glow"></div>
+            <img src="/sage_dashboard.png" alt="SAGE AI Dashboard" className="hero-image" />
+          </motion.div>
+        </section>
 
-
-      {/* ======================
-          TOP HEADER
-      ====================== */}
-
-      <header className="main-header">
-
-        <div>
-
-          <h1>SAGE</h1>
-
-          <p>
-            Your AI Health Companion
-          </p>
-
-        </div>
-
-      </header>
-
-
-      {/* ======================
-          WELCOME
-      ====================== */}
-
-      {showWelcome && (
-
-        <div className="welcome-section">
-
-          <div className="welcome-icon">
-            SAGE AI
+        {/* FEATURES SECTION */}
+        <section className="features-section">
+          <div className="features-header">
+            <h2>Intelligent Health Management</h2>
+            <p>Purpose-built tools to bring clarity to your personal health narrative.</p>
           </div>
 
-          <h2>
-            Hello 👋
-          </h2>
-
-          <p>
-            How can I help with your health?
-          </p>
-
-        </div>
-
-      )}
-
-
-      {/* ======================
-          MESSAGES
-      ====================== */}
-
-      <div className="messages-container">
-
-        {messages.map((message) => (
-
-          <div
-            key={message.id}
-            className={
-              message.role === "user"
-                ? "message-row user-row"
-                : "message-row assistant-row"
-            }
-          >
-
-            {message.role === "assistant" && (
-
-              <div className="message-avatar">
-                S
+          <div className="features-grid">
+            <div className="feature-card">
+              <div className="feature-icon">
+                <MessageSquare size={24} />
               </div>
+              <h3>AI Health Conversation</h3>
+              <p>Engage in natural dialogues about your symptoms, medications, and wellness goals. SAGE listens, analyzes, and provides clinically-grounded insights.</p>
+            </div>
+            
+            <div className="feature-card">
+              <div className="feature-icon">
+                <Brain size={24} />
+              </div>
+              <h3>Personal Health Memory</h3>
+              <p>A chronological, intelligent record of your health events. Never forget a symptom timeline or a reaction detail for your next doctor's visit.</p>
+            </div>
 
-            )}
+            <div className="feature-card">
+              <div className="feature-icon">
+                <LineChart size={24} />
+              </div>
+              <h3>Health Insights</h3>
+              <p>Identify patterns in your sleep, diet, and symptoms over time. Subtle visual data tools help you spot correlations you might otherwise miss.</p>
+            </div>
 
+            <div className="feature-card">
+              <div className="feature-icon">
+                <ShieldCheck size={24} />
+              </div>
+              <h3>Private by Design</h3>
+              <p>Your health data is highly sensitive. We utilize end-to-end encryption and strict access controls. You own your data.</p>
+            </div>
+          </div>
+        </section>
 
-            <div
-              className={
-                message.role === "user"
-                  ? "message user-message"
-                  : "message assistant-message"
-              }
+        {/* CTA SECTION */}
+        <section className="cta-section">
+          <div className="cta-box">
+            <h2>Ready to understand your health?</h2>
+            <p>Join thousands of professionals taking control of their wellness narrative with SAGE AI.</p>
+            <button 
+              className="btn-primary large"
+              onClick={() => setActivePage('chat')}
             >
-
-              {message.content}
-
-            </div>
-
+              Get Started Free
+            </button>
           </div>
+        </section>
 
-        ))}
-
-
-        {/* Thinking */}
-
-        {isThinking && (
-
-          <div className="message-row assistant-row">
-
-            <div className="message-avatar">
-              SAGE AI
+        {/* FOOTER */}
+        <footer className="landing-footer">
+          <div className="footer-content">
+            <span className="copyright">© 2026 SAGE AI. Clinical Minimalist UI.</span>
+            <div className="footer-links">
+              <a href="#">Privacy Policy</a>
+              <a href="#">Terms of Service</a>
+              <a href="#">Contact</a>
             </div>
-
-            <div className="message assistant-message thinking">
-
-              <span>●</span>
-
-              <span>●</span>
-
-              <span>●</span>
-
-            </div>
-
           </div>
-
-        )}
+        </footer>
 
       </div>
-
-
-      {/* ======================
-          QUICK ACTIONS
-      ====================== */}
-
-      {showWelcome && (
-
-        <div className="quick-actions">
-
-          <button
-            className="quick-card"
-            onClick={() => {
-
-              setInput(
-                "I've been experiencing a symptom and would like some information."
-              );
-
-            }}
-          >
-
-            <div className="quick-icon">
-              🩺
-            </div>
-
-            <div>
-
-              <strong>
-                Talk about a symptom
-              </strong>
-
-              <span>
-                Tell SAGE what's bothering you
-              </span>
-
-            </div>
-
-          </button>
-
-
-          <button
-            className="quick-card"
-            onClick={() => {
-
-              setInput(
-                "I want to understand a medical report."
-              );
-
-            }}
-          >
-
-            <div className="quick-icon">
-              🧪
-            </div>
-
-            <div>
-
-              <strong>
-                Understand a report
-              </strong>
-
-              <span>
-                Explain medical information simply
-              </span>
-
-            </div>
-
-          </button>
-
-
-          <button
-            className="quick-card"
-            onClick={() => {
-
-              setInput(
-                "I want to know more about a medicine."
-              );
-
-            }}
-          >
-
-            <div className="quick-icon">
-              💊
-            </div>
-
-            <div>
-
-              <strong>
-                Ask about a medicine
-              </strong>
-
-              <span>
-                Learn general information
-              </span>
-
-            </div>
-
-          </button>
-
-        </div>
-
-      )}
-
-
-      {/* ======================
-          CHAT INPUT
-      ====================== */}
-
-      <div className="chat-input-wrapper">
-
-
-        <div className="chat-input-box">
-
-
-          {/* PLUS */}
-
-          <button
-            className="input-button"
-            onClick={() =>
-              setShowUploadMenu(
-                !showUploadMenu
-              )
-            }
-            title="Add"
-          >
-
-            <Plus size={21} />
-
-          </button>
-
-
-          {/* TEXT */}
-
-          <textarea
-            value={input}
-            onChange={(event) =>
-              setInput(event.target.value)
-            }
-            onKeyDown={handleKeyDown}
-            placeholder={
-              isListening
-                ? "Listening..."
-                : "Tell me what's bothering you..."
-            }
-            rows="1"
-          />
-
-
-          {/* MICROPHONE */}
-
-          <button
-            className={
-              isListening
-                ? "mic-button listening"
-                : "mic-button"
-            }
-            onClick={handleMic}
-            title={
-              isListening
-                ? "Stop listening"
-                : "Speak to SAGE"
-            }
-          >
-
-            {isListening ? (
-
-              <MicOff size={21} />
-
-            ) : (
-
-              <Mic size={21} />
-
-            )}
-
-          </button>
-
-
-          {/* SEND */}
-
-          <button
-            className="send-button"
-            onClick={handleSend}
-            disabled={!input.trim()}
-            title="Send"
-          >
-
-            <Send size={20} />
-
-          </button>
-
-        </div>
-
-
-        {/* ======================
-            UPLOAD MENU
-        ====================== */}
-
-        {showUploadMenu && (
-
-          <div className="upload-menu">
-
-            <button
-              onClick={() =>
-                fileInputRef.current.click()
-              }
-            >
-
-              <Paperclip size={18} />
-
-              <span>
-                Upload document
-              </span>
-
-            </button>
-
-            <button
-              onClick={() =>
-                fileInputRef.current.click()
-              }
-            >
-
-              🖼️
-
-              <span>
-                Upload image
-              </span>
-
-            </button>
-
-          </div>
-
-        )}
-
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".pdf,.png,.jpg,.jpeg"
-          style={{ display: "none" }}
-          onChange={handleFileSelect}
-        />
-
-
-        <p className="chat-disclaimer">
-
-          SAGE provides health information and
-          does not replace professional medical care.
-
-        </p>
-
-      </div>
-
     </div>
-
   );
-
 }
 
 export default Home;
