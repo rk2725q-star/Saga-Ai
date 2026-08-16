@@ -67,7 +67,7 @@ function Home({ setActivePage }) {
             transition={{ delay: 0.4, type: "spring", bounce: 0, duration: 0.8 }}
           >
             <div className="hero-image-glow"></div>
-            <img src="/sage_dashboard.png" alt="SAGE AI Dashboard" className="hero-image" />
+            <img src="/sage_dashboard_final.png" alt="SAGE AI Dashboard" className="hero-image" />
           </motion.div>
         </section>
 
