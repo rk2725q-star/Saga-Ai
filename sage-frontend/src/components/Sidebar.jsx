@@ -1,5 +1,6 @@
-import { House, HeartPulse, FileText, MessageCircle } from "lucide-react";
+import { House, HeartPulse, FileText, MessageCircle, LogOut } from "lucide-react";
 import { motion } from "framer-motion";
+import { supabase } from "../services/supabaseClient";
 
 function Sidebar({ activePage, setActivePage }) {
   const menuItems = [
@@ -29,6 +30,22 @@ function Sidebar({ activePage, setActivePage }) {
           </motion.button>
         );
       })}
+      
+      <div className="nav-divider" style={{ width: '1px', height: '24px', background: 'var(--c-border)', margin: '0 8px' }}></div>
+
+      <motion.button
+        className="bottom-nav-item"
+        onClick={async () => {
+          await supabase.auth.signOut();
+        }}
+        whileTap={{ scale: 0.88 }}
+        transition={{ type: "spring", stiffness: 500, damping: 30 }}
+        title="Logout"
+        aria-label="Logout"
+        style={{ color: '#EF4444' }}
+      >
+        <LogOut size={20} strokeWidth={1.8} />
+      </motion.button>
     </nav>
   );
 }

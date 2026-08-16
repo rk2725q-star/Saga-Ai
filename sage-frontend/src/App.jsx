@@ -1,9 +1,11 @@
-import { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Sidebar from "./components/Sidebar";
 import Home from "./pages/Home";
 import Chat from "./pages/Chat";
 import Health from "./pages/Health";
 import Documents from "./pages/Documents";
+import Auth from "./pages/Auth";
+import { supabase } from "./services/supabaseClient";
 import { AnimatePresence, motion } from "framer-motion";
 
 function App() {
@@ -14,6 +16,21 @@ function App() {
     bloodPressure: null,
     steps: null,
   });
+  const [session, setSession] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const pageVariants = {
     initial: { opacity: 0, y: 20, scale: 0.98 },
@@ -26,6 +43,10 @@ function App() {
     bounce: 0,
     duration: 0.4
   };
+
+  if (!session) {
+    return <Auth setSession={setSession} />;
+  }
 
   return (
     <div className="app">
@@ -63,6 +84,7 @@ function App() {
               <Chat 
                 setUploadedFiles={setUploadedFiles} 
                 setHealthData={setHealthData} 
+                session={session}
               />
             </motion.div>
           )}
@@ -77,7 +99,7 @@ function App() {
               exit="exit"
               transition={pageTransition}
             >
-              <Health healthData={healthData} />
+              <Health healthData={healthData} session={session} />
             </motion.div>
           )}
 
@@ -91,7 +113,7 @@ function App() {
               exit="exit"
               transition={pageTransition}
             >
-              <Documents uploadedFiles={uploadedFiles} setUploadedFiles={setUploadedFiles} />
+              <Documents session={session} uploadedFiles={uploadedFiles} setUploadedFiles={setUploadedFiles} />
             </motion.div>
           )}
         </AnimatePresence>

@@ -1,11 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { HeartPulse, Activity, Footprints, Brain, Trash2, Plus, ChevronRight, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { getMemories, deleteMemory } from "../services/api";
+import { supabase } from "../services/supabaseClient";
 
-const USER_ID = "demo_user";
-
-function Health({ healthData }) {
+function Health({ healthData, session }) {
   const [memories, setMemories] = useState([]);
   const [loadingMemories, setLoadingMemories] = useState(true);
   const [memoryError, setMemoryError] = useState(null);
@@ -14,31 +12,34 @@ function Health({ healthData }) {
   // Fetch memories from backend
   useEffect(() => {
     let cancelled = false;
-    setLoadingMemories(true);
-    setMemoryError(null);
-    getMemories(USER_ID)
-      .then((data) => {
-        if (!cancelled) {
-          // Handle both array and {memories: [...]} shapes
-          setMemories(Array.isArray(data) ? data : data.memories || []);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setMemoryError("Backend offline — memories unavailable.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingMemories(false);
-      });
+    const fetchMems = async () => {
+      if (!session?.user?.id) return;
+      setLoadingMemories(true);
+      setMemoryError(null);
+      const { data, error } = await supabase
+        .from('health_memories')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false });
+
+      if (!cancelled) {
+        if (error) setMemoryError(error.message);
+        else setMemories(data || []);
+        setLoadingMemories(false);
+      }
+    };
+    fetchMems();
     return () => { cancelled = true; };
-  }, []);
+  }, [session]);
 
   const handleDeleteMemory = async (memoryId) => {
     setDeletingId(memoryId);
     try {
-      await deleteMemory(memoryId);
+      const { error } = await supabase.from('health_memories').delete().eq('id', memoryId);
+      if (error) throw error;
       setMemories((prev) => prev.filter((m) => m.id !== memoryId));
-    } catch {
-      // silently ignore
+    } catch (e) {
+      console.error('Delete error:', e);
     } finally {
       setDeletingId(null);
     }

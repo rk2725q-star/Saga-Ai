@@ -11,8 +11,9 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from 'react-markdown';
+import { searchMemories, saveHealthMemory } from "../services/ragService";
 
-function Chat({ setUploadedFiles, setHealthData }) {
+function Chat({ setUploadedFiles, setHealthData, session }) {
   const nvidiaApiKey = import.meta.env.VITE_NVIDIA_API_KEY;
   const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
@@ -183,14 +184,32 @@ function Chat({ setUploadedFiles, setHealthData }) {
       return;
     }
 
+    // Save to user's health memory in the background
+    if (session?.user?.id) {
+      saveHealthMemory(session.user.id, text).catch(e => console.error('Auto-save memory failed:', e));
+    }
+
     fetchCompletion(text);
   };
 
   const fetchCompletion = async (userText) => {
     setIsThinking(true);
     
+    // Fetch relevant past memories using RAG
+    let memoryContext = "";
+    if (session?.user?.id) {
+      const pastMemories = await searchMemories(session.user.id, userText, 5);
+      if (pastMemories && pastMemories.length > 0) {
+        memoryContext = "Here is relevant past health context about the user from their secure memory:\n" 
+          + pastMemories.map(m => `- ${m.content}`).join("\n")
+          + "\nUse this context to provide a highly personalized and accurate response.";
+      }
+    }
+
+    const systemPrompt = "You are SAGE, an AI Health Companion. Provide helpful, safe, and concise health information. Remind users you are an AI, not a doctor. " + memoryContext;
+
     const apiMessages = [
-      { role: "system", content: "You are SAGE, an AI Health Companion. Provide helpful, safe, and concise health information. Remind users you are an AI, not a doctor." },
+      { role: "system", content: systemPrompt },
       ...messages.map(m => ({ role: m.role, content: m.content })),
       { role: "user", content: userText }
     ];
@@ -399,6 +418,20 @@ function Chat({ setUploadedFiles, setHealthData }) {
 
   const showWelcome = messages.length === 0;
 
+  // Extract display name from session
+  let userName = session?.user?.user_metadata?.full_name 
+    || session?.user?.email?.split('@')[0] 
+    || "";
+    
+  // Intelligent Name Filter: Extract only the first alphabetical part (e.g. rk2725q -> rk)
+  if (!session?.user?.user_metadata?.full_name && userName) {
+    const match = userName.match(/^[a-zA-Z]+/);
+    if (match) {
+      userName = match[0];
+    }
+  }
+
+  const displayName = userName ? userName.charAt(0).toUpperCase() + userName.slice(1).toLowerCase() : "";
 
   return (
 
@@ -412,7 +445,7 @@ function Chat({ setUploadedFiles, setHealthData }) {
       {showWelcome && (
         <div className="welcome-center-wrapper">
           <div className="welcome-section">
-            <h2>Hello 👋</h2>
+            <h2>Hello {displayName} 👋</h2>
             <p>How can I help with your health today?</p>
           </div>
 
