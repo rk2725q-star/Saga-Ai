@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/gemini-api/:match*",
+      "destination": "https://generativelanguage.googleapis.com/:match*"
+    },
+    {
+      "source": "/nvidia-api/:match*",
+      "destination": "https://integrate.api.nvidia.com/:match*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
