@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../services/supabaseClient";
+import { extractDocumentText, chatWithDocument } from "../services/ragService";
 
 function getFileIcon(type) {
   if (!type) return File;
@@ -64,7 +65,19 @@ function Documents({ session, uploadedFiles, setUploadedFiles }) {
     setUploading(true);
 
     try {
-      // 1. Upload to Supabase Storage
+      // 1. Convert file to Base64 for Gemini OCR
+      const getBase64 = (fileObj) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(fileObj);
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = error => reject(error);
+      });
+      const base64Data = await getBase64(file);
+
+      // 2. Perform OCR Analysis (Anti-Hallucination)
+      const extractedText = await extractDocumentText(base64Data, file.type);
+
+      // 3. Upload to Supabase Storage
       const fileExt = file.name.split('.').pop();
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
       const filePath = `${session.user.id}/${fileName}`;
@@ -75,13 +88,14 @@ function Documents({ session, uploadedFiles, setUploadedFiles }) {
 
       if (uploadError) throw uploadError;
 
-      // 2. Save metadata to documents table
+      // 4. Save metadata AND OCR Text to documents table
       const { error: dbError } = await supabase.from('documents').insert({
         user_id: session.user.id,
         name: file.name,
         file_path: filePath,
         size: file.size,
-        type: file.type
+        type: file.type,
+        content: extractedText
       });
 
       if (dbError) throw dbError;
@@ -100,13 +114,18 @@ function Documents({ session, uploadedFiles, setUploadedFiles }) {
     setAskingDoc(true);
     setDocAnswer(null);
     try {
-      // SAGE AI Analysis Placeholder since local API is offline
-      setTimeout(() => {
-        setDocAnswer(`SAGE AI Document Analysis: I have analyzed "${activeDoc.name}". Based on my review, the information appears normal, but please consult a doctor for a professional medical opinion on your specific case.`);
+      if (!activeDoc.content) {
+        setDocAnswer("Error: No OCR text found for this document. It may have been uploaded before the OCR feature was added.");
         setAskingDoc(false);
-      }, 1500);
+        return;
+      }
+      
+      // Send question and OCR text to Gemini
+      const answer = await chatWithDocument(activeDoc.content, docQuestion);
+      setDocAnswer(`SAGE: ${answer}`);
     } catch (err) {
       setDocAnswer(`Error: ${err.message}`);
+    } finally {
       setAskingDoc(false);
     }
   };

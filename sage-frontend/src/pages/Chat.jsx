@@ -11,17 +11,19 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from 'react-markdown';
-import { searchMemories, saveHealthMemory } from "../services/ragService";
+import { searchMemories, saveHealthMemory, extractDocumentText } from "../services/ragService";
 
 function Chat({ setUploadedFiles, setHealthData, session }) {
   const nvidiaApiKey = import.meta.env.VITE_NVIDIA_API_KEY;
   const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const geminiApiKeySecondary = import.meta.env.VITE_GEMINI_API_KEY_SECONDARY;
 
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [showUploadMenu, setShowUploadMenu] = useState(false);
+  const [uploadedContext, setUploadedContext] = useState("");
 
   // Follow-up feature states (unused but keeping definitions for now)
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
@@ -206,7 +208,9 @@ function Chat({ setUploadedFiles, setHealthData, session }) {
       }
     }
 
-    const systemPrompt = "You are SAGE, an AI Health Companion. Provide helpful, safe, and concise health information. Remind users you are an AI, not a doctor. " + memoryContext;
+    const systemPrompt = "You are SAGE, an AI Health Companion. Provide helpful, safe, and concise health information. Remind users you are an AI, not a doctor. " 
+      + memoryContext 
+      + (uploadedContext ? `\n\nRecently Uploaded Document Context (use this to answer the user's questions about the document):\n${uploadedContext}` : "");
 
     const apiMessages = [
       { role: "system", content: systemPrompt },
@@ -214,18 +218,15 @@ function Chat({ setUploadedFiles, setHealthData, session }) {
       { role: "user", content: userText }
     ];
 
-    try {
-      // ATTEMPT 1: Google Gemini (Primary)
-      if (!geminiApiKey) throw new Error("Gemini key not configured");
-      
+    const runGemini = async (key) => {
       const response = await fetch("/gemini-api/v1beta/openai/chat/completions", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${geminiApiKey}`,
+          "Authorization": `Bearer ${key}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: "gemini-3.6-flash",
+          model: "gemini-3.7-flash",
           messages: apiMessages,
           temperature: 0.2,
           top_p: 0.7,
@@ -235,38 +236,55 @@ function Chat({ setUploadedFiles, setHealthData, session }) {
       });
 
       if (!response.ok) throw new Error("Gemini API failed: " + response.statusText);
+      return response;
+    };
+
+    try {
+      // ATTEMPT 1: Google Gemini (Primary)
+      if (!geminiApiKey) throw new Error("Primary Gemini key not configured");
+      const response = await runGemini(geminiApiKey);
       await streamResponse(response);
 
     } catch (geminiError) {
-      console.warn("Gemini failed, falling back to NVIDIA:", geminiError);
+      console.warn("Primary Gemini failed, trying secondary...", geminiError);
 
       try {
-        // ATTEMPT 2: NVIDIA Deepseek (Fallback)
-        if (!nvidiaApiKey) throw new Error("NVIDIA key not configured");
-
-        const response = await fetch("/nvidia-api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${nvidiaApiKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            model: "deepseek-ai/deepseek-v4-flash-0731",
-            messages: apiMessages,
-            temperature: 0.2,
-            top_p: 0.7,
-            max_tokens: 1024,
-            stream: true
-          })
-        });
-
-        if (!response.ok) throw new Error("NVIDIA Fallback failed: " + response.statusText);
+        // ATTEMPT 2: Google Gemini (Secondary)
+        if (!geminiApiKeySecondary) throw new Error("Secondary Gemini key not configured");
+        const response = await runGemini(geminiApiKeySecondary);
         await streamResponse(response);
+        
+      } catch (geminiSecondaryError) {
+        console.warn("Both Gemini keys failed, falling back to NVIDIA:", geminiSecondaryError);
 
-      } catch (nvidiaError) {
-        console.error("Both APIs failed:", nvidiaError);
-        setMessages(prev => [...prev, { id: Date.now() + 1, role: "assistant", content: `Sorry, both AI endpoints failed: ${nvidiaError.message}` }]);
-        setIsThinking(false);
+        try {
+          // ATTEMPT 3: NVIDIA Deepseek (Fallback)
+          if (!nvidiaApiKey) throw new Error("NVIDIA key not configured");
+
+          const response = await fetch("/nvidia-api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${nvidiaApiKey}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              model: "deepseek-ai/deepseek-v4-flash-0731",
+              messages: apiMessages,
+              temperature: 0.2,
+              top_p: 0.7,
+              max_tokens: 1024,
+              stream: true
+            })
+          });
+
+          if (!response.ok) throw new Error("NVIDIA Fallback failed: " + response.statusText);
+          await streamResponse(response);
+
+        } catch (nvidiaError) {
+          console.error("All APIs failed:", nvidiaError);
+          setMessages(prev => [...prev, { id: Date.now() + 1, role: "assistant", content: `Sorry, all AI endpoints failed. Please try again later.` }]);
+          setIsThinking(false);
+        }
       }
     }
   };
@@ -368,47 +386,61 @@ function Chat({ setUploadedFiles, setHealthData, session }) {
   // FILE UPLOAD
   // ==========================
 
-  const handleFileSelect = (event) => {
-
+  const handleFileSelect = async (event) => {
     const file = event.target.files[0];
-
     if (!file) return;
 
+    setShowUploadMenu(false);
+    setIsThinking(true);
 
-    if (setUploadedFiles) {
-      setUploadedFiles((prev) => [...prev, {
-        id: Date.now(),
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        url: URL.createObjectURL(file),
-        dateUploaded: new Date().toLocaleDateString()
-      }]);
-    }
-
-    const userMessage = {
-
-      id: Date.now(),
-
-      role: "user",
-
-      content:
-        `📎 Uploaded: ${file.name}`
-
-    };
-
-
+    // Show initial uploading message
+    const userMessageId = Date.now();
     setMessages((previous) => [
-
       ...previous,
-
-      userMessage
-
+      { id: userMessageId, role: "user", content: `📎 Uploading and analyzing: ${file.name}...` }
     ]);
 
+    try {
+      // 1. Convert file to Base64
+      const getBase64 = (fileObj) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(fileObj);
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = error => reject(error);
+      });
+      const base64Data = await getBase64(file);
 
-    setShowUploadMenu(false);
+      // 2. Perform OCR
+      const extractedText = await extractDocumentText(base64Data, file.type);
+      
+      // 3. Save to Chat Context
+      setUploadedContext(extractedText);
 
+      // Update UI Message
+      setMessages((previous) => previous.map(m => 
+        m.id === userMessageId ? { ...m, content: `📎 Uploaded: ${file.name}\n\n*Document analyzed successfully. You can now ask questions about it.*` } : m
+      ));
+
+      // Also save to global documents state if needed
+      if (setUploadedFiles) {
+        setUploadedFiles((prev) => [...prev, {
+          id: Date.now(),
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          url: URL.createObjectURL(file),
+          dateUploaded: new Date().toLocaleDateString()
+        }]);
+      }
+
+    } catch (error) {
+      setMessages((previous) => previous.map(m => 
+        m.id === userMessageId ? { ...m, content: `📎 Failed to analyze ${file.name}: ${error.message}` } : m
+      ));
+    } finally {
+      setIsThinking(false);
+      event.target.value = "";
+    }
   };
 
 
