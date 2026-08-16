@@ -475,13 +475,27 @@ function Chat({ setUploadedFiles, setHealthData, session }) {
       ====================== */}
 
       {showWelcome && (
-        <div className="welcome-center-wrapper">
+        <motion.div className="welcome-center-wrapper" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }}>
           <div className="welcome-section">
-            <h2>Hello {displayName} 👋</h2>
-            <p>How can I help with your health today?</p>
+            <h2>
+              <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2, duration: 0.8 }}>Hello </motion.span>
+              {displayName && <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8, duration: 0.8 }}>{displayName} </motion.span>}
+              <motion.span initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 1.4, type: "spring", stiffness: 200 }} style={{ display: "inline-block" }}>👋</motion.span>
+            </h2>
+            <motion.p initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 2.0, duration: 0.8 }}>
+              Hope you're feeling healthy and well today.
+            </motion.p>
+            <motion.p initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 2.8, duration: 0.8 }}>
+              I'm SAGE. I'm here when you need me.
+            </motion.p>
           </div>
 
-          <div className="quick-actions">
+          <motion.div 
+            className="quick-actions"
+            initial={{ opacity: 0, y: 20 }} 
+            animate={{ opacity: 1, y: 0 }} 
+            transition={{ delay: 3.6, duration: 0.8 }}
+          >
             <motion.button
               className="quick-card"
               onClick={() => setInput("I've been experiencing a symptom and would like some information.")}
@@ -523,8 +537,8 @@ function Chat({ setUploadedFiles, setHealthData, session }) {
                 <span>Learn general information</span>
               </div>
             </motion.button>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
 
 
