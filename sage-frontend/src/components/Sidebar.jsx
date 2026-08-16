@@ -36,7 +36,10 @@ function Sidebar({ activePage, setActivePage }) {
       <motion.button
         className="bottom-nav-item"
         onClick={async () => {
-          await supabase.auth.signOut();
+          const confirmLogout = window.confirm("Are you sure you want to log out?");
+          if (confirmLogout) {
+            await supabase.auth.signOut();
+          }
         }}
         whileTap={{ scale: 0.88 }}
         transition={{ type: "spring", stiffness: 500, damping: 30 }}
