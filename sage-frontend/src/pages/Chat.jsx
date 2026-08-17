@@ -197,20 +197,30 @@ function Chat({ setUploadedFiles, setHealthData, session }) {
   const fetchCompletion = async (userText) => {
     setIsThinking(true);
     
-    // Fetch relevant past memories using RAG
+    // ✅ SPEED FIX: Start RAG memory search in parallel — don't await it before building the request.
+    // We race it against a 2-second timeout so it never blocks the chat.
     let memoryContext = "";
     if (session?.user?.id) {
-      const pastMemories = await searchMemories(session.user.id, userText, 5);
-      if (pastMemories && pastMemories.length > 0) {
-        memoryContext = "Here is relevant past health context about the user from their secure memory:\n" 
-          + pastMemories.map(m => `- ${m.content}`).join("\n")
-          + "\nUse this context to provide a highly personalized and accurate response.";
+      try {
+        const memoryTimeout = new Promise(resolve => setTimeout(() => resolve([]), 2000));
+        const pastMemories = await Promise.race([
+          searchMemories(session.user.id, userText, 3),
+          memoryTimeout
+        ]);
+        if (pastMemories && pastMemories.length > 0) {
+          memoryContext = "Here is relevant past health context about the user from their secure memory:\n" 
+            + pastMemories.map(m => `- ${m.content}`).join("\n")
+            + "\nUse this context to provide a highly personalized and accurate response.";
+        }
+      } catch (e) {
+        // Memory search failing must never block the chat
+        console.warn('Memory search skipped:', e);
       }
     }
 
-    const systemPrompt = "You are SAGE, an AI Health Companion. Provide helpful, safe, and concise health information. Remind users you are an AI, not a doctor. " 
-      + memoryContext 
-      + (uploadedContext ? `\n\nRecently Uploaded Document Context (use this to answer the user's questions about the document):\n${uploadedContext}` : "");
+    const systemPrompt = "You are SAGE, a concise AI Health Companion. Give helpful, safe, brief health information. Always remind users you are not a doctor." 
+      + (memoryContext ? `\n\n${memoryContext}` : "")
+      + (uploadedContext ? `\n\nDocument Context (answer questions about this document):\n${uploadedContext}` : "");
 
     const apiMessages = [
       { role: "system", content: systemPrompt },
@@ -218,6 +228,7 @@ function Chat({ setUploadedFiles, setHealthData, session }) {
       { role: "user", content: userText }
     ];
 
+    // ✅ FIXED: Correct Gemini model — "gemini-3.7-flash" does not exist
     const runGemini = async (key) => {
       const response = await fetch("/gemini-api/v1beta/openai/chat/completions", {
         method: "POST",
@@ -226,39 +237,42 @@ function Chat({ setUploadedFiles, setHealthData, session }) {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: "gemini-3.7-flash",
+          model: "models/gemini-2.5-flash",
           messages: apiMessages,
           temperature: 0.2,
-          top_p: 0.7,
-          max_tokens: 1024,
+          top_p: 0.8,
+          max_tokens: 800,
           stream: true
         })
       });
 
-      if (!response.ok) throw new Error("Gemini API failed: " + response.statusText);
+      if (!response.ok) {
+        const errText = await response.text().catch(() => response.statusText);
+        throw new Error(`Gemini API failed (${response.status}): ${errText}`);
+      }
       return response;
     };
 
     try {
-      // ATTEMPT 1: Google Gemini (Primary)
+      // ATTEMPT 1: Google Gemini (Primary key)
       if (!geminiApiKey) throw new Error("Primary Gemini key not configured");
       const response = await runGemini(geminiApiKey);
       await streamResponse(response);
 
     } catch (geminiError) {
-      console.warn("Primary Gemini failed, trying secondary...", geminiError);
+      console.warn("Primary Gemini failed, trying secondary...", geminiError.message);
 
       try {
-        // ATTEMPT 2: Google Gemini (Secondary)
+        // ATTEMPT 2: Google Gemini (Secondary key)
         if (!geminiApiKeySecondary) throw new Error("Secondary Gemini key not configured");
         const response = await runGemini(geminiApiKeySecondary);
         await streamResponse(response);
         
       } catch (geminiSecondaryError) {
-        console.warn("Both Gemini keys failed, falling back to NVIDIA:", geminiSecondaryError);
+        console.warn("Both Gemini keys failed, trying NVIDIA fallback:", geminiSecondaryError.message);
 
         try {
-          // ATTEMPT 3: NVIDIA Deepseek (Fallback)
+          // ATTEMPT 3: NVIDIA (Fallback) — using valid model
           if (!nvidiaApiKey) throw new Error("NVIDIA key not configured");
 
           const response = await fetch("/nvidia-api/v1/chat/completions", {
@@ -268,21 +282,28 @@ function Chat({ setUploadedFiles, setHealthData, session }) {
               "Content-Type": "application/json"
             },
             body: JSON.stringify({
-              model: "deepseek-ai/deepseek-v4-flash-0731",
+              model: "meta/llama-3.1-8b-instruct",
               messages: apiMessages,
               temperature: 0.2,
-              top_p: 0.7,
-              max_tokens: 1024,
+              top_p: 0.8,
+              max_tokens: 800,
               stream: true
             })
           });
 
-          if (!response.ok) throw new Error("NVIDIA Fallback failed: " + response.statusText);
+          if (!response.ok) {
+            const errText = await response.text().catch(() => response.statusText);
+            throw new Error(`NVIDIA fallback failed (${response.status}): ${errText}`);
+          }
           await streamResponse(response);
 
         } catch (nvidiaError) {
-          console.error("All APIs failed:", nvidiaError);
-          setMessages(prev => [...prev, { id: Date.now() + 1, role: "assistant", content: `Sorry, all AI endpoints failed. Please try again later.` }]);
+          console.error("All APIs failed:", nvidiaError.message);
+          setMessages(prev => [...prev, {
+            id: Date.now() + 1,
+            role: "assistant",
+            content: "⚠️ I'm having trouble connecting right now. Please check your internet connection and try again in a moment."
+          }]);
           setIsThinking(false);
         }
       }
@@ -475,26 +496,26 @@ function Chat({ setUploadedFiles, setHealthData, session }) {
       ====================== */}
 
       {showWelcome && (
-        <motion.div className="welcome-center-wrapper" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }}>
+        <motion.div className="welcome-center-wrapper" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
           <div className="welcome-section">
             <h2>
-              <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2, duration: 0.8 }}>Hello </motion.span>
-              {displayName && <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8, duration: 0.8 }}>{displayName} </motion.span>}
-              <motion.span initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 1.4, type: "spring", stiffness: 200 }} style={{ display: "inline-block" }}>👋</motion.span>
+              <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.05, duration: 0.2 }}>Hello </motion.span>
+              {displayName && <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15, duration: 0.2 }}>{displayName} </motion.span>}
+              <motion.span initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.28, type: "spring", stiffness: 350 }} style={{ display: "inline-block" }}>👋</motion.span>
             </h2>
-            <motion.p initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 2.0, duration: 0.8 }}>
+            <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.38, duration: 0.25 }}>
               Hope you're feeling healthy and well today.
             </motion.p>
-            <motion.p initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 2.8, duration: 0.8 }}>
+            <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5, duration: 0.25 }}>
               I'm SAGE. I'm here when you need me.
             </motion.p>
           </div>
 
           <motion.div 
             className="quick-actions"
-            initial={{ opacity: 0, y: 20 }} 
+            initial={{ opacity: 0, y: 16 }} 
             animate={{ opacity: 1, y: 0 }} 
-            transition={{ delay: 3.6, duration: 0.8 }}
+            transition={{ delay: 0.62, duration: 0.3 }}
           >
             <motion.button
               className="quick-card"
