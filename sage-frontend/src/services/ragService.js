@@ -3,12 +3,8 @@ import { supabase } from './supabaseClient';
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const GEMINI_API_KEY_SECONDARY = import.meta.env.VITE_GEMINI_API_KEY_SECONDARY;
 
-// ✅ Use the correct, confirmed-available models:
-// - gemini-2.5-flash → fast text generation and document chat
-// - gemini-3.7-flash → vision/image/OCR (confirmed on native generateContent API)
-// - text-embedding-004 → vector embeddings for RAG memory search
 const GEMINI_CHAT_MODEL = 'gemini-2.5-flash';
-const GEMINI_VISION_MODEL = 'gemini-3.7-flash'; // Best for image/doc analysis
+const GEMINI_VISION_MODEL = 'gemini-2.0-flash';
 const GEMINI_EMBEDDING_MODEL = 'text-embedding-004';
 
 /**
@@ -107,8 +103,69 @@ export async function searchMemories(userId, queryText, matchCount = 3) {
 }
 
 /**
- * Extract text from a document or image using Gemini 2.0 Flash Vision
- * ✅ Fixed: was using non-existent "gemini-3.7-flash" model
+ * Extract structured health insights (allergies, symptoms, medications) from a conversation.
+ * Uses Gemini to parse and categorize, then saves them to Supabase with metadata.type.
+ * Returns array of saved memory objects or [] on failure.
+ */
+export async function extractAndSaveHealthInsights(userId, userMessage, aiReply) {
+  try {
+    const prompt = `You are a medical data extractor. Analyze this health conversation and extract specific health facts.
+
+User said: "${userMessage}"
+AI response summary: "${aiReply.slice(0, 500)}"
+
+Extract ONLY concrete health facts the USER mentioned about THEMSELVES. Return a JSON array (no markdown, raw JSON only).
+Each item must have:
+- "content": short fact (max 10 words), e.g. "Allergic to penicillin"
+- "type": one of "allergy", "symptom", "medication", "vital", "general"
+
+Rules:
+- Only extract facts the USER said about themselves
+- Skip greetings, questions, vague statements
+- If nothing to extract, return []
+
+Example output:
+[{"content":"Allergic to penicillin","type":"allergy"},{"content":"Has frequent headaches","type":"symptom"}]`;
+
+    const data = await fetchGeminiWithFallback(`${GEMINI_CHAT_MODEL}:generateContent`, {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.1, maxOutputTokens: 512 }
+    });
+
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+    
+    // Parse JSON safely
+    let insights = [];
+    try {
+      // Strip any markdown code fences if present
+      const cleaned = rawText.replace(/```json|```/g, '').trim();
+      insights = JSON.parse(cleaned);
+    } catch {
+      console.warn('Failed to parse insights JSON:', rawText);
+      return [];
+    }
+
+    if (!Array.isArray(insights) || insights.length === 0) return [];
+
+    // Save each insight as a separate memory with metadata
+    const saved = await Promise.allSettled(
+      insights.map(insight =>
+        saveHealthMemory(userId, insight.content, { type: insight.type || 'general' })
+      )
+    );
+
+    return saved
+      .filter(r => r.status === 'fulfilled')
+      .map(r => r.value);
+
+  } catch (err) {
+    console.error('extractAndSaveHealthInsights failed (non-blocking):', err);
+    return [];
+  }
+}
+
+/**
+ * Extract text from a document or image using Gemini Vision
  */
 export async function extractDocumentText(fileBase64, mimeType) {
   try {
@@ -141,7 +198,6 @@ export async function extractDocumentText(fileBase64, mimeType) {
 
 /**
  * Chat with a document using its OCR text
- * Uses gemini-2.5-flash for fast text-based Q&A on document content
  */
 export async function chatWithDocument(documentText, question) {
   try {

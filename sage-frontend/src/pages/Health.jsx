@@ -1,15 +1,15 @@
-import { useState, useEffect, useRef } from "react";
-import { HeartPulse, Activity, Footprints, Brain, Trash2, Plus, ChevronRight, AlertCircle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { HeartPulse, Activity, Footprints, Brain, Trash2, AlertCircle, ShieldAlert, Stethoscope, Pill } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../services/supabaseClient";
 
-function Health({ healthData, session }) {
+function Health({ healthData, session, memoryVersion }) {
   const [memories, setMemories] = useState([]);
   const [loadingMemories, setLoadingMemories] = useState(true);
   const [memoryError, setMemoryError] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
-  // Fetch memories from backend
+  // Fetch memories from backend — re-fetches whenever memoryVersion changes (new memory saved from Chat)
   useEffect(() => {
     let cancelled = false;
     const fetchMems = async () => {
@@ -30,7 +30,7 @@ function Health({ healthData, session }) {
     };
     fetchMems();
     return () => { cancelled = true; };
-  }, [session]);
+  }, [session, memoryVersion]); // memoryVersion triggers re-fetch on new chat insight
 
   const handleDeleteMemory = async (memoryId) => {
     setDeletingId(memoryId);
@@ -101,6 +101,14 @@ function Health({ healthData, session }) {
     },
   ];
 
+  // Group memories by type from metadata
+  const allergies = memories.filter(m => m.metadata?.type === 'allergy');
+  const symptoms = memories.filter(m => m.metadata?.type === 'symptom');
+  const medications = memories.filter(m => m.metadata?.type === 'medication');
+  const otherMemories = memories.filter(m => 
+    !['allergy', 'symptom', 'medication'].includes(m.metadata?.type)
+  );
+
   const stagger = {
     show: { transition: { staggerChildren: 0.07 } },
     hidden: {},
@@ -110,6 +118,46 @@ function Health({ healthData, session }) {
     show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 400, damping: 28 } },
   };
 
+  const MemoryTag = ({ mem }) => (
+    <motion.div
+      key={mem.id}
+      variants={fadeUp}
+      exit={{ opacity: 0, x: -20 }}
+      className="health-tag-item"
+    >
+      <span className="health-tag-text">{mem.content || mem.memory || mem.text}</span>
+      <button
+        className="memory-delete-btn"
+        onClick={() => handleDeleteMemory(mem.id)}
+        disabled={deletingId === mem.id}
+        title="Forget this"
+      >
+        <Trash2 size={12} />
+      </button>
+    </motion.div>
+  );
+
+  const CategoryCard = ({ icon: Icon, color, title, items, emptyText }) => (
+    <motion.div variants={fadeUp} className="health-category-card">
+      <div className="health-category-header">
+        <div className="health-category-icon" style={{ background: `${color}18`, color }}>
+          <Icon size={18} />
+        </div>
+        <h3 className="health-category-title">{title}</h3>
+        <span className="health-category-count">{items.length}</span>
+      </div>
+      {items.length === 0 ? (
+        <p className="health-category-empty">{emptyText}</p>
+      ) : (
+        <AnimatePresence>
+          <motion.div className="health-tag-list" variants={stagger} initial="hidden" animate="show">
+            {items.map(mem => <MemoryTag key={mem.id} mem={mem} />)}
+          </motion.div>
+        </AnimatePresence>
+      )}
+    </motion.div>
+  );
+
   return (
     <div className="inner-page">
       <div className="inner-page-scroll">
@@ -117,7 +165,7 @@ function Health({ healthData, session }) {
         <div className="inner-page-header">
           <div>
             <h1 className="inner-page-title">My Health</h1>
-            <p className="inner-page-subtitle">Your personal health snapshot</p>
+            <p className="inner-page-subtitle">Your health context, under your control.</p>
           </div>
         </div>
 
@@ -173,40 +221,65 @@ function Health({ healthData, session }) {
           })}
         </motion.div>
 
-        {/* Memory Section */}
-        <div className="memory-section">
-          <div className="memory-section-header">
-            <div className="memory-section-title-row">
-              <Brain size={18} style={{ color: "var(--c-primary)" }} />
-              <h2 className="memory-section-title">SAGE Memory</h2>
-            </div>
-            <span className="memory-section-subtitle">
-              Things SAGE has remembered about your health
-            </span>
+        {/* Structured Health Categories */}
+        {loadingMemories ? (
+          <div className="memory-loading" style={{ marginTop: 24 }}>
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="memory-skeleton" style={{ width: `${70 + i * 10}%` }} />
+            ))}
           </div>
+        ) : memoryError ? (
+          <div className="memory-empty" style={{ marginTop: 24 }}>
+            <AlertCircle size={32} style={{ color: "var(--c-text-4)", marginBottom: 12 }} />
+            <p>{memoryError}</p>
+          </div>
+        ) : (
+          <motion.div 
+            className="health-categories-grid"
+            variants={stagger} 
+            initial="hidden" 
+            animate="show"
+            style={{ marginTop: 20 }}
+          >
+            <CategoryCard
+              icon={ShieldAlert}
+              color="#EF4444"
+              title="Allergies"
+              items={allergies}
+              emptyText="No allergies noted yet."
+            />
+            <CategoryCard
+              icon={Stethoscope}
+              color="#F59E0B"
+              title="Current Concerns"
+              items={symptoms}
+              emptyText="No symptoms noted yet."
+            />
+            <CategoryCard
+              icon={Pill}
+              color="#3B82F6"
+              title="Medications"
+              items={medications}
+              emptyText="No medications noted yet."
+            />
+          </motion.div>
+        )}
 
-          {loadingMemories ? (
-            <div className="memory-loading">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="memory-skeleton" style={{ width: `${70 + i * 10}%` }} />
-              ))}
+        {/* Other memories (general / vital type) */}
+        {otherMemories.length > 0 && (
+          <div className="memory-section" style={{ marginTop: 20 }}>
+            <div className="memory-section-header">
+              <div className="memory-section-title-row">
+                <Brain size={18} style={{ color: "var(--c-primary)" }} />
+                <h2 className="memory-section-title">SAGE Memory</h2>
+              </div>
+              <span className="memory-section-subtitle">
+                Other health notes SAGE remembered
+              </span>
             </div>
-          ) : memoryError ? (
-            <div className="memory-empty">
-              <AlertCircle size={32} style={{ color: "var(--c-text-4)", marginBottom: 12 }} />
-              <p>{memoryError}</p>
-              <span>Start the backend server to load memories.</span>
-            </div>
-          ) : memories.length === 0 ? (
-            <div className="memory-empty">
-              <Brain size={32} style={{ color: "var(--c-text-4)", marginBottom: 12 }} />
-              <p>No memories yet</p>
-              <span>Chat with SAGE and it will remember important health details here.</span>
-            </div>
-          ) : (
             <AnimatePresence>
               <motion.div className="memory-list" variants={stagger} initial="hidden" animate="show">
-                {memories.map((mem) => (
+                {otherMemories.map((mem) => (
                   <motion.div
                     key={mem.id}
                     variants={fadeUp}
@@ -236,8 +309,8 @@ function Health({ healthData, session }) {
                 ))}
               </motion.div>
             </AnimatePresence>
-          )}
-        </div>
+          </div>
+        )}
 
       </div>
     </div>

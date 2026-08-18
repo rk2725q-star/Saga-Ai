@@ -17,6 +17,9 @@ function App() {
     steps: null,
   });
   const [session, setSession] = useState(null);
+  const [memoryVersion, setMemoryVersion] = useState(0);
+
+  const handleMemoryUpdate = () => setMemoryVersion(v => v + 1);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -85,6 +88,7 @@ function App() {
                 setUploadedFiles={setUploadedFiles} 
                 setHealthData={setHealthData} 
                 session={session}
+                onMemoryUpdate={handleMemoryUpdate}
               />
             </motion.div>
           )}
@@ -99,7 +103,7 @@ function App() {
               exit="exit"
               transition={pageTransition}
             >
-              <Health healthData={healthData} session={session} />
+              <Health healthData={healthData} session={session} memoryVersion={memoryVersion} />
             </motion.div>
           )}
 

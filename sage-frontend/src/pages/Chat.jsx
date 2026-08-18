@@ -11,9 +11,9 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from 'react-markdown';
-import { searchMemories, saveHealthMemory, extractDocumentText } from "../services/ragService";
+import { searchMemories, extractAndSaveHealthInsights, extractDocumentText } from "../services/ragService";
 
-function Chat({ setUploadedFiles, setHealthData, session }) {
+function Chat({ setUploadedFiles, setHealthData, session, onMemoryUpdate }) {
   const nvidiaApiKey = import.meta.env.VITE_NVIDIA_API_KEY;
   const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
   const geminiApiKeySecondary = import.meta.env.VITE_GEMINI_API_KEY_SECONDARY;
@@ -186,10 +186,7 @@ function Chat({ setUploadedFiles, setHealthData, session }) {
       return;
     }
 
-    // Save to user's health memory in the background
-    if (session?.user?.id) {
-      saveHealthMemory(session.user.id, text).catch(e => console.error('Auto-save memory failed:', e));
-    }
+    // Health insight extraction is done AFTER AI responds (in streamResponse)
 
     fetchCompletion(text);
   };
@@ -363,6 +360,18 @@ CORE RULES:
             }
           }
         }
+      }
+      // ✅ After streaming completes: extract health insights from conversation & save to memory
+      if (session?.user?.id && currentResponse) {
+        // Find the last user message
+        const lastUserMsg = messages.filter(m => m.role === 'user').slice(-1)[0]?.content || '';
+        extractAndSaveHealthInsights(session.user.id, lastUserMsg, currentResponse)
+          .then(saved => {
+            if (saved && saved.length > 0 && onMemoryUpdate) {
+              onMemoryUpdate(); // Trigger Health page refresh
+            }
+          })
+          .catch(e => console.warn('Health insight extraction failed (non-blocking):', e));
       }
     } catch (err) {
       console.error(err);
