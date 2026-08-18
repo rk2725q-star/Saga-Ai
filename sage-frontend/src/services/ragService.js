@@ -104,40 +104,45 @@ export async function searchMemories(userId, queryText, matchCount = 3) {
 
 /**
  * Extract structured health insights (allergies, symptoms, medications) from a conversation.
- * Uses Gemini to parse and categorize, then saves them to Supabase with metadata.type.
- * Returns array of saved memory objects or [] on failure.
+ * Saves them to Supabase health_memories with metadata.type for Health page categorization.
+ * ALSO saves a plain text memory for RAG search context.
  */
-export async function extractAndSaveHealthInsights(userId, userMessage, aiReply) {
+export async function extractAndSaveHealthInsights(userId, userMessage, aiReply, onMemoryUpdate) {
   try {
-    const prompt = `You are a medical data extractor. Analyze this health conversation and extract specific health facts.
+    const prompt = `You are a medical data extractor. Analyze what the USER said about their own health.
 
-User said: "${userMessage}"
-AI response summary: "${aiReply.slice(0, 500)}"
+User message: "${userMessage}"
 
-Extract ONLY concrete health facts the USER mentioned about THEMSELVES. Return a JSON array (no markdown, raw JSON only).
+Extract ONLY concrete health facts the USER mentioned about THEMSELVES.
+Return a JSON array (raw JSON only, no markdown code fences).
+
 Each item must have:
-- "content": short fact (max 10 words), e.g. "Allergic to penicillin"
+- "content": short fact in plain English (max 10 words), e.g. "Allergic to penicillin"  
 - "type": one of "allergy", "symptom", "medication", "vital", "general"
 
 Rules:
-- Only extract facts the USER said about themselves
-- Skip greetings, questions, vague statements
-- If nothing to extract, return []
+- ONLY extract facts the USER stated about themselves
+- Skip questions, greetings, vague statements like "I feel unwell"  
+- For specific allergies: type = "allergy"
+- For symptoms/diseases/conditions: type = "symptom"
+- For medicines they take: type = "medication"
+- For heart rate, BP, steps: type = "vital"
+- If nothing concrete to extract, return []
 
-Example output:
-[{"content":"Allergic to penicillin","type":"allergy"},{"content":"Has frequent headaches","type":"symptom"}]`;
+Example:
+User: "I'm allergic to penicillin and I have diabetes and headaches"
+Output: [{"content":"Allergic to penicillin","type":"allergy"},{"content":"Has diabetes","type":"symptom"},{"content":"Has frequent headaches","type":"symptom"}]`;
 
     const data = await fetchGeminiWithFallback(`${GEMINI_CHAT_MODEL}:generateContent`, {
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.1, maxOutputTokens: 512 }
+      generationConfig: { temperature: 0.0, maxOutputTokens: 512 }
     });
 
     const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
     
-    // Parse JSON safely
+    // Parse JSON safely — strip markdown fences if any
     let insights = [];
     try {
-      // Strip any markdown code fences if present
       const cleaned = rawText.replace(/```json|```/g, '').trim();
       insights = JSON.parse(cleaned);
     } catch {
@@ -147,20 +152,97 @@ Example output:
 
     if (!Array.isArray(insights) || insights.length === 0) return [];
 
-    // Save each insight as a separate memory with metadata
+    // Save each insight with metadata type (for Health page categories)
     const saved = await Promise.allSettled(
       insights.map(insight =>
         saveHealthMemory(userId, insight.content, { type: insight.type || 'general' })
       )
     );
 
-    return saved
+    const successfullySaved = saved
       .filter(r => r.status === 'fulfilled')
       .map(r => r.value);
 
+    // Trigger Health page refresh if any were saved
+    if (successfullySaved.length > 0 && onMemoryUpdate) {
+      onMemoryUpdate();
+    }
+
+    return successfullySaved;
   } catch (err) {
     console.error('extractAndSaveHealthInsights failed (non-blocking):', err);
     return [];
+  }
+}
+
+// ============================================================
+// CHAT HISTORY — Supabase persistence
+// ============================================================
+
+/**
+ * Load chat history for a user from Supabase (last 50 messages)
+ */
+export async function loadChatHistory(userId) {
+  try {
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true })
+      .limit(50);
+
+    if (error) {
+      console.warn('Chat history load error:', error.message);
+      return [];
+    }
+    return (data || []).map(row => ({
+      id: row.id,
+      role: row.role,
+      content: row.content,
+      created_at: row.created_at
+    }));
+  } catch (err) {
+    console.error('loadChatHistory error:', err);
+    return [];
+  }
+}
+
+/**
+ * Save a single chat message to Supabase
+ */
+export async function saveChatMessage(userId, role, content) {
+  try {
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .insert({ user_id: userId, role, content })
+      .select()
+      .single();
+
+    if (error) {
+      console.warn('saveChatMessage error:', error.message);
+      return null;
+    }
+    return data;
+  } catch (err) {
+    console.error('saveChatMessage error:', err);
+    return null;
+  }
+}
+
+/**
+ * Clear all chat history for a user
+ */
+export async function clearChatHistory(userId) {
+  try {
+    const { error } = await supabase
+      .from('chat_messages')
+      .delete()
+      .eq('user_id', userId);
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.error('clearChatHistory error:', err);
+    return false;
   }
 }
 

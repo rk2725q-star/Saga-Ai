@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from 'react-markdown';
-import { searchMemories, extractAndSaveHealthInsights, extractDocumentText } from "../services/ragService";
+import { searchMemories, extractAndSaveHealthInsights, extractDocumentText, saveChatMessage, loadChatHistory, clearChatHistory } from "../services/ragService";
 
 function Chat({ setUploadedFiles, setHealthData, session, onMemoryUpdate }) {
   const nvidiaApiKey = import.meta.env.VITE_NVIDIA_API_KEY;
@@ -24,6 +24,23 @@ function Chat({ setUploadedFiles, setHealthData, session, onMemoryUpdate }) {
   const [isThinking, setIsThinking] = useState(false);
   const [showUploadMenu, setShowUploadMenu] = useState(false);
   const [uploadedContext, setUploadedContext] = useState("");
+  const [historyLoading, setHistoryLoading] = useState(true);
+
+  // Load chat history from Supabase on mount
+  useEffect(() => {
+    if (!session?.user?.id) { setHistoryLoading(false); return; }
+    loadChatHistory(session.user.id).then(history => {
+      if (history && history.length > 0) {
+        setMessages(history.map(m => ({ id: m.id, role: m.role, content: m.content })));
+      }
+      setHistoryLoading(false);
+    }).catch(() => setHistoryLoading(false));
+  }, [session?.user?.id]);
+
+  const messagesEndRef = useRef(null);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isThinking]);
 
   // Follow-up feature states (unused but keeping definitions for now)
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
@@ -186,8 +203,12 @@ function Chat({ setUploadedFiles, setHealthData, session, onMemoryUpdate }) {
       return;
     }
 
-    // Health insight extraction is done AFTER AI responds (in streamResponse)
+    // Save user message to Supabase chat history
+    if (session?.user?.id) {
+      saveChatMessage(session.user.id, 'user', text).catch(e => console.warn('Save user msg failed:', e));
+    }
 
+    // Health insight extraction is done AFTER AI responds (in fetchCompletion)
     fetchCompletion(text);
   };
 
@@ -263,7 +284,7 @@ CORE RULES:
       // ATTEMPT 1: Google Gemini (Primary key)
       if (!geminiApiKey) throw new Error("Primary Gemini key not configured");
       const response = await runGemini(geminiApiKey);
-      await streamResponse(response);
+      await streamResponse(response, userText);
 
     } catch (geminiError) {
       console.warn("Primary Gemini failed, trying secondary...", geminiError.message);
@@ -272,13 +293,13 @@ CORE RULES:
         // ATTEMPT 2: Google Gemini (Secondary key)
         if (!geminiApiKeySecondary) throw new Error("Secondary Gemini key not configured");
         const response = await runGemini(geminiApiKeySecondary);
-        await streamResponse(response);
+        await streamResponse(response, userText);
         
       } catch (geminiSecondaryError) {
         console.warn("Both Gemini keys failed, trying NVIDIA fallback:", geminiSecondaryError.message);
 
         try {
-          // ATTEMPT 3: NVIDIA (Fallback) — using valid model
+          // ATTEMPT 3: NVIDIA (Fallback)
           if (!nvidiaApiKey) throw new Error("NVIDIA key not configured");
 
           const response = await fetch("/nvidia-api/v1/chat/completions", {
@@ -301,7 +322,7 @@ CORE RULES:
             const errText = await response.text().catch(() => response.statusText);
             throw new Error(`NVIDIA fallback failed (${response.status}): ${errText}`);
           }
-          await streamResponse(response);
+          await streamResponse(response, userText);
 
         } catch (nvidiaError) {
           console.error("All APIs failed:", nvidiaError.message);
@@ -316,7 +337,7 @@ CORE RULES:
     }
   };
 
-  const streamResponse = async (response) => {
+  const streamResponse = async (response, userText = '') => {
     try {
       const assistantMessageId = Date.now() + 1;
       setMessages(prev => [...prev, { id: assistantMessageId, role: "assistant", content: "" }]);
@@ -361,17 +382,17 @@ CORE RULES:
           }
         }
       }
-      // ✅ After streaming completes: extract health insights from conversation & save to memory
+      // ✅ After streaming: save AI message + extract health insights
       if (session?.user?.id && currentResponse) {
-        // Find the last user message
-        const lastUserMsg = messages.filter(m => m.role === 'user').slice(-1)[0]?.content || '';
-        extractAndSaveHealthInsights(session.user.id, lastUserMsg, currentResponse)
-          .then(saved => {
-            if (saved && saved.length > 0 && onMemoryUpdate) {
-              onMemoryUpdate(); // Trigger Health page refresh
-            }
-          })
-          .catch(e => console.warn('Health insight extraction failed (non-blocking):', e));
+        // Save to chat history
+        saveChatMessage(session.user.id, 'assistant', currentResponse)
+          .catch(e => console.warn('Save AI msg failed:', e));
+        
+        // Extract health insights (allergy/symptom/medication) from what user said
+        if (userText) {
+          extractAndSaveHealthInsights(session.user.id, userText, currentResponse, onMemoryUpdate)
+            .catch(e => console.warn('Health insight extraction failed (non-blocking):', e));
+        }
       }
     } catch (err) {
       console.error(err);
@@ -380,6 +401,7 @@ CORE RULES:
       setIsThinking(false);
     }
   };
+
 
   const submitFollowUp = () => {
     setShowFollowUpModal(false);
@@ -487,7 +509,7 @@ CORE RULES:
   // EMPTY HOME SCREEN
   // ==========================
 
-  const showWelcome = messages.length === 0;
+  const showWelcome = messages.length === 0 && !historyLoading;
 
   // Extract display name from session
   let userName = session?.user?.user_metadata?.full_name 
@@ -623,6 +645,8 @@ CORE RULES:
               </div>
             </motion.div>
           )}
+          {/* Scroll anchor */}
+          <div ref={messagesEndRef} />
         </div>
 
 
@@ -743,11 +767,28 @@ CORE RULES:
 
 
         <p className="chat-disclaimer">
-
-          SAGE provides health information and
-          does not replace professional medical care.
-
+          SAGE provides health information and does not replace professional medical care.
         </p>
+
+        {/* Clear chat history button */}
+        {messages.length > 0 && session?.user?.id && (
+          <div style={{ textAlign: 'center', marginTop: 2 }}>
+            <button
+              onClick={async () => {
+                if (window.confirm('Clear all chat history?')) {
+                  await clearChatHistory(session.user.id);
+                  setMessages([]);
+                }
+              }}
+              style={{
+                fontSize: '11px', color: 'var(--c-text-4)', background: 'none',
+                border: 'none', cursor: 'pointer', textDecoration: 'underline', padding: '2px 8px'
+              }}
+            >
+              Clear history
+            </button>
+          </div>
+        )}
 
       </div>
 
